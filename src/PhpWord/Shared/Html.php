@@ -128,6 +128,8 @@ class Html
             'ul'        => array('List',        null,   null,       $styles,    $data,  3,              null),
             'ol'        => array('List',        null,   null,       $styles,    $data,  7,              null),
             'li'        => array('ListItem',    $node,  $element,   $styles,    $data,  null,           null),
+            'a'         => array('Link',        $node,  $element,   $styles,    null,   null,           null),
+            'img'       => array('Image',       $node,  $element,   $styles,    $data,  null,           null),
         );
 
         $newElement = null;
@@ -173,7 +175,7 @@ class Html
      */
     private static function parseChildNodes($node, $element, $styles, $data)
     {
-        if ('li' != $node->nodeName) {
+        if ($node->nodeName != 'li' && $node->nodeName != 'a') {
             $cNodes = $node->childNodes;
             if (count($cNodes) > 0) {
                 foreach ($cNodes as $cNode) {
@@ -373,5 +375,44 @@ class Html
         }
 
         return $styles;
+    }
+
+    /**
+     * Parse link
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array &$styles
+     * @return null
+     */
+
+    private static function parseLink($node, $element, &$styles) {
+        foreach ($node->attributes as $attribute) {
+            if ($attribute->name == 'href') {
+                $element->addLink($attribute->value, $node->nodeValue, array('color' => '0000FF'));
+                return;
+            }
+        }
+    }
+
+    /**
+     * Parse image
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array &$styles
+     * @return null
+     */
+
+    private static function parseImage($node, $element, &$styles) {
+        foreach ($node->attributes as $attribute) {
+            if ($attribute->name == 'src') {
+                $path = $attribute->value;
+                // handle relative urls
+                if ($path[0] == '/') {
+                    $path = 'http://' . $_SERVER['SERVER_NAME'] . $attribute->value;
+                }
+                echo $path; exit;
+                $element->addImage($path);
+            }
+        }
     }
 }
