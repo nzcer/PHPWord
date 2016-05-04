@@ -410,7 +410,6 @@ class Html
                 if ($path[0] == '/') {
                     $path = 'http://' . $_SERVER['SERVER_NAME'] . $attribute->value;
                 }
-                echo $path; exit;
                 $element->addImage($path);
             }
         }
