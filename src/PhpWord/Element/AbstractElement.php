@@ -102,6 +102,13 @@ abstract class AbstractElement
     private $parentContainer;
 
     /**
+     * Instance of the parent container
+     *
+     * @var \PhpOffice\PhpWord\Element\AbstractContainer
+     */
+    private $parentContainerInstance;
+
+    /**
      * Has media relation flag; true for Link, Image, and Object
      *
      * @var bool
@@ -114,6 +121,16 @@ abstract class AbstractElement
      * @var bool
      */
     protected $collectionRelation = false;
+
+    /**
+     * Magic method for accessing private or protected object variables
+     *
+     * @param string $prop
+     */
+    public function __get($prop)
+    {
+        return $this->$prop;
+    }
 
     /**
      * Get PhpWord
@@ -277,6 +294,7 @@ abstract class AbstractElement
     public function setParentContainer(AbstractElement $container)
     {
         $this->parentContainer = substr(get_class($container), strrpos(get_class($container), '\\') + 1);
+        $this->parentContainerInstance = $container;
 
         // Set nested level
         $this->nestedLevel = $container->getNestedLevel();

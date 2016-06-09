@@ -46,19 +46,22 @@ class Html
         // Preprocess: remove all line ends, decode HTML entity,
         // fix ampersand and angle brackets and add body tag for HTML fragments
         $html = str_replace(array("\n", "\r"), '', $html);
-        $html = str_replace(array('&lt;', '&gt;', '&amp;'), array('_lt_', '_gt_', '_amp_'), $html);
-        $html = html_entity_decode($html, ENT_QUOTES, 'UTF-8');
-        $html = str_replace('&', '&amp;', $html);
-        $html = str_replace(array('_lt_', '_gt_', '_amp_'), array('&lt;', '&gt;', '&amp;'), $html);
+        $html = preg_replace('~>\\s+<~m', '><', $html);
+        //$html = str_replace(array('&lt;', '&gt;', '&amp;'), array('_lt_', '_gt_', '_amp_'), $html);
+        //$html = html_entity_decode($html, ENT_QUOTES, 'UTF-8');
+        //$html = str_replace('&', '&amp;', $html);
+        //$html = str_replace(array('_lt_', '_gt_', '_amp_'), array('&lt;', '&gt;', '&amp;'), $html);
 
         if (false === $fullHTML) {
             $html = '<body>' . $html . '</body>';
         }
 
+        $html = "<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>" . $html;
+
         // Load DOM
         $dom = new \DOMDocument();
         $dom->preserveWhiteSpace = true;
-        $dom->loadXML($html);
+        $dom->loadHTML($html);
         $node = $dom->getElementsByTagName('body');
 
         self::parseNode($node->item(0), $element);
@@ -122,14 +125,15 @@ class Html
             'em'        => array('Property',    null,   null,       $styles,    null,   'italic',       true),
             'sup'       => array('Property',    null,   null,       $styles,    null,   'superScript',  true),
             'sub'       => array('Property',    null,   null,       $styles,    null,   'subScript',    true),
-            'table'     => array('Table',       $node,  $element,   $styles,    null,   'addTable',     true),
-            'tr'        => array('Table',       $node,  $element,   $styles,    null,   'addRow',       true),
-            'td'        => array('Table',       $node,  $element,   $styles,    null,   'addCell',      true),
+            'table'     => array('Table',       $node,  $element,   $styles,    null,   'TableStyle',   null),
+            'tr'        => array('TableRow',    $node,  $element,   $styles,    null,   null,           null),
+            'td'        => array('TableCell',   $node,  $element,   $styles,    null,   null,           null),
             'ul'        => array('List',        null,   null,       $styles,    $data,  3,              null),
             'ol'        => array('List',        null,   null,       $styles,    $data,  7,              null),
             'li'        => array('ListItem',    $node,  $element,   $styles,    $data,  null,           null),
             'a'         => array('Link',        $node,  $element,   $styles,    null,   null,           null),
-            'img'       => array('Image',       $node,  $element,   $styles,    $data,  null,           null),
+            'img'       => array('Image',       $node,  $element,   $styles,    null,   null,           null),
+            'input'     => array('TextBox',     $node,  $element,   $styles,    null,   null,           null),
         );
 
         $newElement = null;
@@ -175,16 +179,53 @@ class Html
      */
     private static function parseChildNodes($node, $element, $styles, $data)
     {
-        if ($node->nodeName != 'li' && $node->nodeName != 'a') {
+        if ($node->nodeName != 'a') {
             $cNodes = $node->childNodes;
-            if (count($cNodes) > 0) {
+            if ($cNodes->length > 0) {
+                $currentElement = $element;
                 foreach ($cNodes as $cNode) {
-                    if ($element instanceof AbstractContainer) {
-                        self::parseNode($cNode, $element, $styles, $data);
-                    }
+                    $currentElement = self::getCurrentElement($cNode, $currentElement, $styles, $data);
+                    self::parseNode($cNode, $currentElement, $styles, $data);
                 }
             }
         }
+    }
+
+    /**
+     * Helper function for determining whether a text wrapper should be inserted into the current element,
+     * or, conversely, whether the parentContainer should be used
+     *
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array $styles
+     * @param array $data
+     * @return \PhpOffice\PhpWord\Element\AbstractContainer $element
+     */
+    private static function getCurrentElement($node, $element, $styles, $data)
+    {
+        // ignore certain HTML tags
+        if (in_array($node->nodeName, array('article', 'div', 'header'))) {
+            return $element;
+        }
+
+        // nodes that can be added to TextRuns
+        $nodes = array(
+            '#text', 'strong', 'em', 'sup', 'sub', 'a', 'img'
+        );
+
+        $currentElement = $element;
+
+        // if element is a text wrapper and the node cannot be added to a text wrapper, remove text wrapper
+        if ($element->container == 'TextRun' && ! in_array($node->nodeName, $nodes)) {
+            $currentElement = $element->parentContainerInstance;
+        }
+
+        // if node is inline text and isn't inside a text wrapper the add a generic text wrapper
+        if (in_array($node->nodeName, $nodes) && ! in_array($element->container, array('TextRun', 'TextBox', 'ListItemRun'))) {
+            $currentElement = self::parseParagraph($node, $element, $styles);
+        }
+
+        return $currentElement;
     }
 
     /**
@@ -234,11 +275,9 @@ class Html
     {
         $styles['font'] = self::parseInlineStyle($node, $styles['font']);
 
-        // Commented as source of bug #257. `method_exists` doesn't seems to work properly in this case.
-        // @todo Find better error checking for this one
-        // if (method_exists($element, 'addText')) {
-            $element->addText($node->nodeValue, $styles['font'], $styles['paragraph']);
-        // }
+        if (is_callable(array($element, 'addText'))) {
+            $element->addText(preg_replace('/(\s)+/', ' ', $node->nodeValue), $styles['font'], $styles['paragraph']);
+        }
 
         return null;
     }
@@ -264,7 +303,6 @@ class Html
      * @param \DOMNode $node
      * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
      * @param array &$styles
-     * @param string $argument1 Method name
      * @return \PhpOffice\PhpWord\Element\AbstractContainer $element
      *
      * @todo As soon as TableItem, RowItem and CellItem support relative width and height
@@ -272,20 +310,45 @@ class Html
     private static function parseTable($node, $element, &$styles, $argument1)
     {
         $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
+        // work around bug https://github.com/PHPOffice/PHPWord/issues/629
+        $style = \PhpOffice\PhpWord\Style::getStyle($argument1);
+        $newElement = $element->addTable($style);
 
-        $newElement = $element->$argument1();
+        return $newElement;
+    }
 
-        // $attributes = $node->attributes;
-        // if ($attributes->getNamedItem('width') !== null) {
-            // $newElement->setWidth($attributes->getNamedItem('width')->value);
-        // }
+    /**
+     * Parse table row node
+     *
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array &$styles
+     * @return \PhpOffice\PhpWord\Element\AbstractContainer $element
+     *
+     * @todo As soon as TableItem, RowItem and CellItem support relative width and height
+     */
+    private static function parseTableRow($node, $element, &$styles)
+    {
+        $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
+        $newElement = $element->addRow();
 
-        // if ($attributes->getNamedItem('height') !== null) {
-            // $newElement->setHeight($attributes->getNamedItem('height')->value);
-        // }
-        // if ($attributes->getNamedItem('width') !== null) {
-            // $newElement=$element->addCell($width=$attributes->getNamedItem('width')->value);
-        // }
+        return $newElement;
+    }
+
+    /**
+     * Parse table cell node
+     *
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array &$styles
+     * @return \PhpOffice\PhpWord\Element\AbstractContainer $element
+     *
+     * @todo As soon as TableItem, RowItem and CellItem support relative width and height
+     */
+    private static function parseTableCell($node, $element, &$styles)
+    {
+        $styles['paragraph'] = self::parseInlineStyle($node, $styles['paragraph']);
+        $newElement = $element->addCell();
 
         return $newElement;
     }
@@ -324,18 +387,9 @@ class Html
      */
     private static function parseListItem($node, $element, &$styles, $data)
     {
-        $cNodes = $node->childNodes;
-        if (count($cNodes) > 0) {
-            $text = '';
-            foreach ($cNodes as $cNode) {
-                if ($cNode->nodeName == '#text') {
-                    $text = $cNode->nodeValue;
-                }
-            }
-            $element->addListItem($text, $data['listdepth'], $styles['font'], $styles['list'], $styles['paragraph']);
-        }
+        $newElement = $element->addListItemRun($data['listdepth'], $styles['list'], $styles['paragraph']);
 
-        return null;
+        return $newElement;
     }
 
     /**
@@ -378,6 +432,20 @@ class Html
     }
 
     /**
+     * Parse line break
+     *
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @return null
+     */
+
+    private static function parseLineBreak($element)
+    {
+        $element->addTextBreak();
+
+        return null;
+    }
+
+    /**
      * Parse link
      * @param \DOMNode $node
      * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
@@ -402,7 +470,7 @@ class Html
      * @return null
      */
 
-    private static function parseImage($node, $element, &$styles) {
+    /*private static function parseImage($node, $element, &$styles) {
         foreach ($node->attributes as $attribute) {
             if ($attribute->name == 'src') {
                 $path = $attribute->value;
@@ -410,8 +478,75 @@ class Html
                 if ($path[0] == '/') {
                     $path = 'http://' . $_SERVER['SERVER_NAME'] . $attribute->value;
                 }
-                $element->addImage($path);
+                //$element->addImage($path);
             }
         }
+    }*/
+
+    private static function parseImage($node, $element, &$styles, $data)
+    {
+        $style = array();
+        foreach ($node->attributes as $attribute) {
+            switch ($attribute->name) {
+                case 'src':
+                    $src = $attribute->value;
+                    // handle relative urls
+                    if ($src[0] == '/') {
+                        $src = 'http://' . $_SERVER['SERVER_NAME'] . $attribute->value;
+                    }
+                    break;
+                case 'width':
+                    $width=$attribute->value;
+                    $style['width']=$width;
+                    break;
+                case 'height':
+                    $height=$attribute->value;
+                    $style['height']=$height;
+                    break;
+                case 'style':
+                    $styleattr = explode(';', $attribute->value);
+                    foreach ($styleattr as $attr) {
+                        if (strpos($attr, ':')) {
+                            list($k, $v) = explode(':', $attr);
+                            switch ($k) {
+                                case 'float':
+                                    if (trim($v) == 'right') {
+                                        $style['hPos'] = \PhpOffice\PhpWord\Style\Image::POS_RIGHT;
+                                        $style['hPosRelTo'] = \PhpOffice\PhpWord\Style\Image::POS_RELTO_PAGE;
+                                        $style['pos'] = \PhpOffice\PhpWord\Style\Image::POS_RELATIVE;
+                                        $style['wrap'] = \PhpOffice\PhpWord\Style\Image::WRAP_TIGHT;
+                                        $style['overlap'] = true;
+                                    }
+                                    if (trim($v)=='left') {
+                                        $style['hPos'] = \PhpOffice\PhpWord\Style\Image::POS_LEFT;
+                                        $style['hPosRelTo'] = \PhpOffice\PhpWord\Style\Image::POS_RELTO_PAGE;
+                                        $style['pos'] = \PhpOffice\PhpWord\Style\Image::POS_RELATIVE;
+                                        $style['wrap'] = \PhpOffice\PhpWord\Style\Image::WRAP_TIGHT;
+                                        $style['overlap'] = true;
+                                    }
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+            }
+        }
+        $newElement = $element->addImage($src, $style);
+        
+        return $newElement;
+    }
+
+    /**
+     * Parse image
+     * @param \DOMNode $node
+     * @param \PhpOffice\PhpWord\Element\AbstractContainer $element
+     * @param array &$styles
+     * @return null
+     */
+
+    private static function parseTextBox($node, $element, &$styles) {
+        $newElement = $element->addTextBox();
+
+        return $newElement;
     }
 }
