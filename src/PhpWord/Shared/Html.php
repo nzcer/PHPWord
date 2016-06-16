@@ -276,7 +276,8 @@ class Html
         $styles['font'] = self::parseInlineStyle($node, $styles['font']);
 
         if (is_callable(array($element, 'addText'))) {
-            $element->addText(preg_replace('/(\s)+/', ' ', $node->nodeValue), $styles['font'], $styles['paragraph']);
+            $text = preg_replace('/(\s)+/', ' ', $node->nodeValue);
+            $element->addText(htmlspecialchars($text, ENT_COMPAT, 'UTF-8'), $styles['font'], $styles['paragraph']);
         }
 
         return null;
