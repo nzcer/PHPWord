@@ -631,6 +631,10 @@ class Html
             switch ($attribute->name) {
                 case 'src':
                     $src = $attribute->value;
+                    // handle relative urls
+                    if ($src[0] == '/') {
+                        $src = 'http://' . $_SERVER['SERVER_NAME'] . $attribute->value;
+                    }
                     break;
                 case 'width':
                     $width = $attribute->value;
